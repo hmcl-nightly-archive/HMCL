@@ -1,0 +1,65 @@
+name: Sync
+
+on:
+  push:
+  schedule:
+    - cron: 0 0/12 * * *
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Upstream
+        uses: actions/checkout@v7
+        with:
+          repository: HMCL-dev/HMCL
+          ref: main
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fetch-depth: 0
+      - name: Checkout .github
+        uses: actions/checkout@v7
+        with:
+          path: hna-main
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: true
+      - name: Prepare
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add owner git@github.com:neveler/HMCL.git
+          git remote add hna git@github.com:${{ github.repository }}.git
+
+          mkdir -p hna-main/.github/scripts/data
+          echo "${{ hashFiles('HMCL/src/main/resources/assets/lang/I18N*.properties') }}" > hna-main/.github/scripts/data/i18n-hash
+          npm i properties-file@5.0.6
+      - name: Archive Upstream Artifact
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const script = require("./hna-main/.github/scripts/archive-upstream-workflow-artifact.js");
+            await script({ github, context, core });
+      - name: Generate I18N Report
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.I18N_REPORT_TOKEN }}
+          script: |
+            const script = require("./hna-main/.github/scripts/generate-i18n-report.js");
+            await script({ github, context, core });
+      - name: Remove History Workflow
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const script = require("./hna-main/.github/scripts/remove-history-workflow.js");
+            await script({ github, context, core });
+      - name: Update .github
+        run: |
+          git pull origin main:main && git push owner main:main
+          rm -rf .github && mv hna-main/.github .github && rm -rf hna-main
+          git add .github && git commit -m "sync [skip ci]" && git push -f hna main:hna-main
